@@ -58,9 +58,20 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     vk::FALSE
 }
 
+struct QueueFamilyIndices {
+    graphics_family: Option<u32>,
+}
+
+impl QueueFamilyIndices {
+    pub fn is_complete(&self) -> bool {
+        self.graphics_family.is_some()
+    }
+}
+
 struct VulkanApp {
     _entry: ash::Entry,
     instance: ash::Instance,
+    _physical_device: vk::PhysicalDevice,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
 }
@@ -69,9 +80,11 @@ impl VulkanApp {
     fn new() -> VulkanApp {
         let entry = ash::Entry::new().unwrap();
         let instance = Self::create_instance(&entry);
+        let _physical_device = Self::pick_physical_device(&instance);
         let (debug_utils_loader, debug_messenger) = Self::setup_debug_utils(&entry, &instance);
         VulkanApp {
             _entry: entry,
+            _physical_device,
             instance,
             debug_utils_loader,
             debug_messenger,
@@ -131,6 +144,70 @@ impl VulkanApp {
                 .expect("Failed to create instance")
         };
         instance
+    }
+
+    fn pick_physical_device(instance: &ash::Instance) -> vk::PhysicalDevice {
+        let physical_devices = unsafe {
+            instance
+                .enumerate_physical_devices()
+                .expect("Failed to enumerate physical devices")
+        };
+        println!(
+            "Found {} devices with Vulkan support",
+            physical_devices.len()
+        );
+        for &physical_device in physical_devices.iter() {
+            if Self::is_device_suitable(instance, physical_device) {
+                return physical_device;
+            }
+        }
+        panic!("No suitable physical devices");
+    }
+
+    fn is_device_suitable(instance: &ash::Instance, physical_device: vk::PhysicalDevice) -> bool {
+        // More features can be queried with `get_physical_device_features`
+        let device_properties = unsafe { instance.get_physical_device_properties(physical_device) };
+
+        let device_type = match device_properties.device_type {
+            vk::PhysicalDeviceType::CPU => "Cpu",
+            vk::PhysicalDeviceType::INTEGRATED_GPU => "Integrated GPU",
+            vk::PhysicalDeviceType::DISCRETE_GPU => "Discrete GPU",
+            vk::PhysicalDeviceType::VIRTUAL_GPU => "Virtual GPU",
+            vk::PhysicalDeviceType::OTHER => "Unknown",
+            _ => panic!("Matching on device type failed"),
+        };
+        let device_name = vk_to_string(&device_properties.device_name);
+        println!(
+            "\tDevice Name: {}, id: {}, type: {}",
+            device_name, device_properties.device_id, device_type,
+        );
+
+        let indices = Self::find_queue_family(instance, physical_device);
+        return indices.is_complete();
+
+    }
+
+    fn find_queue_family(instance: &ash::Instance, physical_device: vk::PhysicalDevice) -> QueueFamilyIndices {
+        let queue_families = unsafe {
+            instance.get_physical_device_queue_family_properties(physical_device)
+        };
+        let mut queue_family_indices = QueueFamilyIndices {
+            graphics_family: None,
+        };
+
+        for (index, queue_family) in queue_families.iter().enumerate() {
+            if queue_family.queue_count > 0
+                && queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+            {
+                queue_family_indices.graphics_family = Some(index as u32);
+            }
+
+            if queue_family_indices.is_complete() {
+                break;
+            }
+        }
+
+        queue_family_indices
     }
 
     fn setup_debug_utils(
