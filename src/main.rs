@@ -360,6 +360,7 @@ fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEX
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_device(None);
             self.debug_utils_loader
                 .destroy_debug_utils_messenger(self.debug_messenger, None);
             self.instance.destroy_instance(None);
