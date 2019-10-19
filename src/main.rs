@@ -3,7 +3,7 @@ use std::os::raw::{c_char, c_void};
 
 use ash::extensions::ext::DebugUtils;
 use ash::extensions::khr::{Surface, XlibSurface};
-use ash::version::{EntryV1_0, InstanceV1_0};
+use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::{vk, vk_make_version};
 
 use winit::event::{Event, WindowEvent};
@@ -28,8 +28,18 @@ fn required_extension_names() -> Vec<*const i8> {
     ]
 }
 
-fn required_validation_layers() -> [&'static str; 1] {
-    ["VK_LAYER_KHRONOS_validation"]
+const REQUIRED_VALIDATION_LAYERS: [&'static str; 1] = [
+    "VK_LAYER_KHRONOS_validation"
+];
+
+fn enabled_validation_layer_names() -> Vec<CString> {
+    // Can't inline raw_names
+    // because the CString contents gets moved and dropped
+    // It'll result in "Layer not found" Vk error.
+    REQUIRED_VALIDATION_LAYERS
+        .iter()
+        .map(|&layer_name| CString::new(layer_name).unwrap())
+        .collect()
 }
 
 // The callback function used in Debug Utils
@@ -70,8 +80,10 @@ impl QueueFamilyIndices {
 
 struct VulkanApp {
     _entry: ash::Entry,
-    instance: ash::Instance,
     _physical_device: vk::PhysicalDevice,
+    _graphics_queue: vk::Queue,
+    instance: ash::Instance,
+    device: ash::Device,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
 }
@@ -80,11 +92,14 @@ impl VulkanApp {
     fn new() -> VulkanApp {
         let entry = ash::Entry::new().unwrap();
         let instance = Self::create_instance(&entry);
-        let _physical_device = Self::pick_physical_device(&instance);
+        let physical_device = Self::pick_physical_device(&instance);
+        let (logical_device, graphics_queue) = Self::create_logical_device(&instance, physical_device);
         let (debug_utils_loader, debug_messenger) = Self::setup_debug_utils(&entry, &instance);
         VulkanApp {
             _entry: entry,
-            _physical_device,
+            _physical_device: physical_device,
+            _graphics_queue: graphics_queue,
+            device: logical_device,
             instance,
             debug_utils_loader,
             debug_messenger,
@@ -113,28 +128,21 @@ impl VulkanApp {
         // Provides VK_EXT debug utils
         let extension_names = required_extension_names();
 
-        // Can't inline enabled_layer_names_raw into enabled_layer_names
-        // because the CString contents gets moved and dropped
-        // It'll result in "Layer not found" Vk error.
-        let enabled_layer_names_raw: Vec<CString> = required_validation_layers()
-            .iter()
-            .map(|layer_name| CString::new(*layer_name).unwrap())
-            .collect();
-        let enabled_layer_names: Vec<*const i8> = enabled_layer_names_raw
-            .iter()
-            .map(|layer_name| layer_name.as_ptr())
-            .collect();
+        let enabled_layer_raw_names = enabled_validation_layer_names();
+
+        let enabled_layer_names: Vec<*const c_char> = enabled_layer_raw_names
+            .iter().map(|layer_name| layer_name.as_ptr()).collect();
         // You can create structs plainly by providing all fields
         let create_info = vk::InstanceCreateInfo {
+            s_type: vk::StructureType::INSTANCE_CREATE_INFO,
+            p_next: &debug_utils_create_info
+                as *const vk::DebugUtilsMessengerCreateInfoEXT
+                as *const c_void,
             p_application_info: &app_info,
             enabled_extension_count: extension_names.len() as u32,
             pp_enabled_extension_names: extension_names.as_ptr(),
             enabled_layer_count: enabled_layer_names.len() as u32,
             pp_enabled_layer_names: enabled_layer_names.as_ptr(),
-            // You can do ..Deafult::default() instead of passing defaults explicitly
-            s_type: vk::StructureType::INSTANCE_CREATE_INFO,
-            p_next: &debug_utils_create_info as *const vk::DebugUtilsMessengerCreateInfoEXT
-                as *const c_void,
             flags: vk::InstanceCreateFlags::empty(),
         };
 
@@ -210,6 +218,50 @@ impl VulkanApp {
         queue_family_indices
     }
 
+    fn create_logical_device(
+        instance: &ash::Instance,
+        physical_device: vk::PhysicalDevice,
+    ) -> (ash::Device, vk::Queue) {
+        let indices = Self::find_queue_family(instance, physical_device);
+        let graphics_family = indices.graphics_family.unwrap();
+
+        let queue_priorities = [1.0_f32];
+        let queue_create_info = vk::DeviceQueueCreateInfo {
+            queue_family_index: graphics_family,
+            p_queue_priorities: queue_priorities.as_ptr(),
+            queue_count: queue_priorities.len() as u32,
+            ..Default::default()
+        };
+
+        let physical_device_features = vk::PhysicalDeviceFeatures {
+            ..Default::default()
+        };
+
+        let enabled_layer_raw_names = enabled_validation_layer_names();
+        let enabled_layer_names: Vec<*const c_char> = enabled_layer_raw_names
+            .iter().map(|layer_name| layer_name.as_ptr()).collect();
+
+        let device_create_info = vk::DeviceCreateInfo {
+            queue_create_info_count: 1,
+            p_queue_create_infos: &queue_create_info,
+            enabled_layer_count: enabled_layer_names.len() as u32,
+            pp_enabled_layer_names: enabled_layer_names.as_ptr(),
+            p_enabled_features: &physical_device_features,
+            ..Default::default()
+        };
+
+        // TODO: figure out reasons why logical device should be created
+        //  through the instance call. In the C/C++, logical device ton't interact
+        //  directly with instances and instance isn't used in logical device
+        //  creation.
+        let device: ash::Device = unsafe {
+            instance.create_device(physical_device, &device_create_info, None)
+                .expect("Failed to create logical Device!")
+        };
+        let graphics_queue = unsafe { device.get_device_queue(graphics_family, 0) };
+        (device, graphics_queue)
+    }
+
     fn setup_debug_utils(
         entry: &ash::Entry,
         instance: &ash::Instance,
@@ -273,7 +325,7 @@ impl VulkanApp {
             }
         }
 
-        for required_layer_name in required_validation_layers().iter() {
+        for required_layer_name in REQUIRED_VALIDATION_LAYERS.iter() {
             let mut is_found = false;
             for layer_property in layer_properties.iter() {
                 let test_layer_name = vk_to_string(&layer_property.layer_name);
@@ -301,7 +353,6 @@ fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEX
             | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
             | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
         pfn_user_callback: Some(vulkan_debug_utils_callback),
-        // Providing ..Default::default() to fill the rest fields with default values
         ..Default::default()
     }
 }
