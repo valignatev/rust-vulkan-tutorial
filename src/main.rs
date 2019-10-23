@@ -364,7 +364,11 @@ impl VulkanApp {
         (debug_utils_loader, utils_messenger)
     }
 
-    fn run(self, event_loop: EventLoop<()>, window: Window) {
+    fn draw_frame(&mut self) {
+       
+    }
+
+    fn run(mut self, event_loop: EventLoop<()>, window: Window) {
         event_loop.run(move |event, _, control_flow| {
             match event {
                 Event::EventsCleared => {
@@ -380,7 +384,10 @@ impl VulkanApp {
                 Event::WindowEvent {
                     event: WindowEvent::CloseRequested,
                     ..
-                } => *control_flow = ControlFlow::Exit,
+                } => {
+                    self.draw_frame();
+                    *control_flow = ControlFlow::Exit;
+                },
                 _ => *control_flow = ControlFlow::Poll,
             }
         });
