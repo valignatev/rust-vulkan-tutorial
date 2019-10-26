@@ -149,12 +149,17 @@ impl VulkanApp {
         let entry = ash::Entry::new().unwrap();
         let instance = Self::create_instance(&entry);
         let surface_stuff = Self::create_surface(&entry, &instance, &window);
-        let physical_device = Self::pick_physical_device(&instance, &surface_stuff);
+        let (physical_device, indices) = Self::pick_physical_device(&instance, &surface_stuff);
         let (logical_device, graphics_queue, present_queue) =
-            Self::create_logical_device(&instance, physical_device, &surface_stuff);
+            Self::create_logical_device(&instance, physical_device, &indices);
         let (debug_utils_loader, debug_messenger) = Self::setup_debug_utils(&entry, &instance);
-        let swapchain_stuff =
-            Self::create_swapchain(&instance, physical_device, &logical_device, &surface_stuff);
+        let swapchain_stuff = Self::create_swapchain(
+            &instance,
+            physical_device,
+            &logical_device,
+            &surface_stuff,
+            &indices,
+        );
         VulkanApp {
             _entry: entry,
             instance,
@@ -244,7 +249,7 @@ impl VulkanApp {
     fn pick_physical_device(
         instance: &ash::Instance,
         surface_stuff: &SurfaceStuff,
-    ) -> vk::PhysicalDevice {
+    ) -> (vk::PhysicalDevice, QueueFamilyIndices) {
         let physical_devices = unsafe {
             instance
                 .enumerate_physical_devices()
@@ -255,8 +260,9 @@ impl VulkanApp {
             physical_devices.len()
         );
         for &physical_device in physical_devices.iter() {
-            if Self::is_device_suitable(instance, physical_device, surface_stuff) {
-                return physical_device;
+            let indices = Self::find_queue_family(instance, physical_device, surface_stuff);
+            if Self::is_device_suitable(instance, physical_device, surface_stuff, &indices) {
+                return (physical_device, indices);
             }
         }
         panic!("No suitable physical devices");
@@ -266,6 +272,7 @@ impl VulkanApp {
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
         surface_stuff: &SurfaceStuff,
+        indices: &QueueFamilyIndices,
     ) -> bool {
         // More features can be queried with `get_physical_device_features`
         let device_properties = unsafe { instance.get_physical_device_properties(physical_device) };
@@ -284,7 +291,6 @@ impl VulkanApp {
             device_name, device_properties.device_id, device_type,
         );
 
-        let indices = Self::find_queue_family(instance, physical_device, surface_stuff);
         let is_queue_family_supported = indices.is_complete();
         let is_device_extension_supported =
             Self::check_device_extension_support(instance, physical_device);
@@ -344,13 +350,8 @@ impl VulkanApp {
                 .expect("Failed to get device extension properties.")
         };
         let mut available_extension_names = vec![];
-        println!("\tAvailable Device Extensions: ");
         for extension in available_extensions.iter() {
             let extension_name = vk_to_string(&extension.extension_name);
-            println!(
-                "\t\tName: {}, Version: {}",
-                extension_name, extension.spec_version
-            );
             available_extension_names.push(extension_name);
         }
         let mut required_extensions = HashSet::new();
@@ -439,6 +440,7 @@ impl VulkanApp {
         physical_device: vk::PhysicalDevice,
         device: &ash::Device,
         surface_stuff: &SurfaceStuff,
+        indices: &QueueFamilyIndices,
     ) -> SwapchainStuff {
         let swapchain_support = Self::query_swapchain_support(physical_device, surface_stuff);
         let surface_format = Self::choose_swapchain_format(&swapchain_support.formats);
@@ -447,14 +449,12 @@ impl VulkanApp {
         // Sometimes we may have to wait on the driver to complete its stuff before
         // we can acquire another image to render to. Therefore it's recommended to
         // request at least one more image than the minimum
-        let mut image_count = swapchain_support.capabilities.min_image_count + 1;
-        if swapchain_support.capabilities.max_image_count > 0
-            && image_count > swapchain_support.capabilities.max_image_count
-        {
-            image_count = swapchain_support.capabilities.max_image_count;
-        }
-
-        let indices = Self::find_queue_family(instance, physical_device, surface_stuff);
+        let image_count = swapchain_support.capabilities.min_image_count + 1;
+        let image_count = if swapchain_support.capabilities.max_image_count > 0 {
+            image_count.min(swapchain_support.capabilities.max_image_count)
+        } else {
+            image_count
+        };
 
         let mut create_info = vk::SwapchainCreateInfoKHR {
             surface: surface_stuff.surface,
@@ -512,9 +512,8 @@ impl VulkanApp {
     fn create_logical_device(
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
-        surface_stuff: &SurfaceStuff,
+        indices: &QueueFamilyIndices,
     ) -> (ash::Device, vk::Queue, vk::Queue) {
-        let indices = Self::find_queue_family(instance, physical_device, surface_stuff);
         let graphics_family = indices.graphics_family.unwrap();
         let present_family = indices.present_family.unwrap();
 
@@ -620,14 +619,7 @@ impl VulkanApp {
         if layer_properties.len() <= 0 {
             eprintln!("No available layers.");
             return false;
-        } else {
-            println!("Instance Available layers: ");
-            for layer in layer_properties.iter() {
-                let layer_name = vk_to_string(&layer.layer_name);
-                println!("\t{}", layer_name);
-            }
         }
-
         for required_layer_name in REQUIRED_VALIDATION_LAYERS.iter() {
             let mut is_found = false;
             for layer_property in layer_properties.iter() {
