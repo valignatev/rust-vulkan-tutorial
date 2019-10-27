@@ -140,6 +140,7 @@ struct VulkanApp {
     swapchain_loader: ash::extensions::khr::Swapchain,
     swapchain: vk::SwapchainKHR,
     _swapchain_images: Vec<vk::Image>,
+    swapchain_imageviews: Vec<vk::ImageView>,
     _swapchain_format: vk::Format,
     _swapchain_extent: vk::Extent2D,
 }
@@ -150,15 +151,20 @@ impl VulkanApp {
         let instance = Self::create_instance(&entry);
         let surface_stuff = Self::create_surface(&entry, &instance, &window);
         let (physical_device, indices) = Self::pick_physical_device(&instance, &surface_stuff);
-        let (logical_device, graphics_queue, present_queue) =
+        let (device, graphics_queue, present_queue) =
             Self::create_logical_device(&instance, physical_device, &indices);
         let (debug_utils_loader, debug_messenger) = Self::setup_debug_utils(&entry, &instance);
         let swapchain_stuff = Self::create_swapchain(
             &instance,
             physical_device,
-            &logical_device,
+            &device,
             &surface_stuff,
             &indices,
+        );
+        let swapchain_imageviews = Self::create_image_views(
+            &device,
+            swapchain_stuff.swapchain_format,
+            &swapchain_stuff.swapchain_images,
         );
         VulkanApp {
             _entry: entry,
@@ -169,7 +175,7 @@ impl VulkanApp {
             debug_messenger,
 
             _physical_device: physical_device,
-            device: logical_device,
+            device,
 
             _graphics_queue: graphics_queue,
             _present_queue: present_queue,
@@ -177,6 +183,7 @@ impl VulkanApp {
             swapchain_loader: swapchain_stuff.swapchain_loader,
             swapchain: swapchain_stuff.swapchain,
             _swapchain_images: swapchain_stuff.swapchain_images,
+            swapchain_imageviews,
             _swapchain_format: swapchain_stuff.swapchain_format,
             _swapchain_extent: swapchain_stuff.swapchain_extent,
         }
@@ -509,6 +516,44 @@ impl VulkanApp {
         }
     }
 
+    fn create_image_views(
+        device: &ash::Device,
+        surface_format: vk::Format,
+        images: &Vec<vk::Image>,
+    ) -> Vec<vk::ImageView> {
+        let mut swapchain_imageviews = vec![];
+
+        for &image in images.iter() {
+            let imageview_create_info = vk::ImageViewCreateInfo {
+                view_type: vk::ImageViewType::TYPE_2D,
+                format: surface_format,
+                components: vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::IDENTITY,
+                    g: vk::ComponentSwizzle::IDENTITY,
+                    b: vk::ComponentSwizzle::IDENTITY,
+                    a: vk::ComponentSwizzle::IDENTITY,
+                },
+                subresource_range: vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+                image,
+                ..Default::default()
+            };
+            let imageview = unsafe {
+                device
+                    .create_image_view(&imageview_create_info, None)
+                    .expect("Failed to create Image View!")
+            };
+            swapchain_imageviews.push(imageview);
+        }
+
+        swapchain_imageviews
+    }
+
     fn create_logical_device(
         instance: &ash::Instance,
         physical_device: vk::PhysicalDevice,
@@ -655,6 +700,9 @@ fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEX
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
+            for &imageview in self.swapchain_imageviews.iter() {
+                self.device.destroy_image_view(imageview, None);
+            }
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain, None);
             self.device.destroy_device(None);
