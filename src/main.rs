@@ -166,6 +166,7 @@ impl VulkanApp {
             swapchain_stuff.swapchain_format,
             &swapchain_stuff.swapchain_images,
         );
+        let _graphics_pipeline = Self::create_graphics_pipeline();
         VulkanApp {
             _entry: entry,
             instance,
@@ -552,6 +553,10 @@ impl VulkanApp {
         }
 
         swapchain_imageviews
+    }
+
+    fn create_graphics_pipeline() {
+
     }
 
     fn create_logical_device(
