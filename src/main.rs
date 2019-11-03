@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
+use std::path::Path;
 
 use ash::extensions::ext::DebugUtils;
 use ash::extensions::khr::{Surface, XlibSurface};
@@ -166,7 +167,7 @@ impl VulkanApp {
             swapchain_stuff.swapchain_format,
             &swapchain_stuff.swapchain_images,
         );
-        let _graphics_pipeline = Self::create_graphics_pipeline();
+        let _graphics_pipeline = Self::create_graphics_pipeline(&device);
         VulkanApp {
             _entry: entry,
             instance,
@@ -555,8 +556,57 @@ impl VulkanApp {
         swapchain_imageviews
     }
 
-    fn create_graphics_pipeline() {
+    fn create_graphics_pipeline(device: &ash::Device) {
+        let vert_shader_code = Self::read_shader_code(Path::new("shaders/vert.spv"));
+        let frag_shader_code = Self::read_shader_code(Path::new("shaders/frag.spv"));
 
+        let vert_shader_module = Self::create_shader_module(device, vert_shader_code);
+        let frag_shader_module = Self::create_shader_module(device, frag_shader_code);
+
+        let shader_entrypoint = CString::new("main").unwrap();
+
+        let _shader_stages = [
+            vk::PipelineShaderStageCreateInfo {
+                stage: vk::ShaderStageFlags::VERTEX,
+                module: vert_shader_module,
+                p_name: shader_entrypoint.as_ptr(),
+                ..Default::default()
+            },
+            vk::PipelineShaderStageCreateInfo {
+                stage: vk::ShaderStageFlags::FRAGMENT,
+                module: frag_shader_module,
+                p_name: shader_entrypoint.as_ptr(),
+                ..Default::default()
+            },
+        ];
+
+        unsafe {
+            device.destroy_shader_module(vert_shader_module, None);
+            device.destroy_shader_module(frag_shader_module, None);
+        }
+    }
+
+    fn read_shader_code(shader_path: &Path) -> Vec<u8> {
+        use std::fs::File;
+        use std::io::Read;
+
+        let spv_file = File::open(shader_path)
+            .expect(&format!("Failed to find spv file at {:?}", shader_path));
+        let bytes_code: Vec<u8> = spv_file.bytes().filter_map(|byte| byte.ok()).collect();
+        bytes_code
+    }
+
+    fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
+        let shader_module_create_info = vk::ShaderModuleCreateInfo {
+            code_size: code.len(),
+            p_code: code.as_ptr() as *const u32,
+            ..Default::default()
+        };
+        unsafe {
+            device
+                .create_shader_module(&shader_module_create_info, None)
+                .expect("Failed to create Shader Module.")
+        }
     }
 
     fn create_logical_device(
