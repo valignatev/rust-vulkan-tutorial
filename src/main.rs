@@ -56,9 +56,6 @@ const REQUIRED_VALIDATION_LAYERS: [&'static str; 1] = ["VK_LAYER_KHRONOS_validat
 const DEVICE_EXTENSIONS: [&'static str; 1] = ["VK_KHR_swapchain"];
 
 fn enabled_validation_layer_names() -> Vec<CString> {
-    // Can't inline raw_names
-    // because the CString contents gets moved and dropped
-    // It'll result in "Layer not found" Vk error.
     REQUIRED_VALIDATION_LAYERS
         .iter()
         .map(|&layer_name| CString::new(layer_name).unwrap())
