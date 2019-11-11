@@ -790,10 +790,6 @@ impl VulkanApp {
             ..Default::default()
         };
 
-        // TODO: figure out reasons why logical device should be created
-        //  through the instance call. In the C/C++, logical device ton't interact
-        //  directly with instances and instance isn't used in logical device
-        //  creation.
         let device: ash::Device = unsafe {
             instance
                 .create_device(physical_device, &device_create_info, None)
