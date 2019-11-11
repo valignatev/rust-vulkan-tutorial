@@ -839,15 +839,11 @@ impl VulkanApp {
             return false;
         }
         for required_layer_name in REQUIRED_VALIDATION_LAYERS.iter() {
-            let mut is_found = false;
-            for layer_property in layer_properties.iter() {
-                let test_layer_name = vk_to_string(&layer_property.layer_name);
-                if (*required_layer_name) == test_layer_name {
-                    is_found = true;
-                    break;
-                }
-            }
-            if !is_found {
+            if layer_properties
+                .iter()
+                .find(|property| *required_layer_name == vk_to_string(&property.layer_name))
+                .is_none()
+            {
                 return false;
             }
         }
