@@ -142,6 +142,7 @@ struct VulkanApp {
     _swapchain_format: vk::Format,
     _swapchain_extent: vk::Extent2D,
     pipeline_layout: vk::PipelineLayout,
+    render_pass: vk::RenderPass,
 }
 
 impl VulkanApp {
@@ -165,6 +166,7 @@ impl VulkanApp {
             swapchain_stuff.swapchain_format,
             &swapchain_stuff.swapchain_images,
         );
+        let render_pass = Self::create_render_pass(&device, swapchain_stuff.swapchain_format);
         let pipeline_layout =
             Self::create_graphics_pipeline(&device, swapchain_stuff.swapchain_extent);
 
@@ -190,6 +192,7 @@ impl VulkanApp {
             _swapchain_extent: swapchain_stuff.swapchain_extent,
 
             pipeline_layout,
+            render_pass,
         }
     }
 
@@ -671,6 +674,52 @@ impl VulkanApp {
         pipeline_layout
     }
 
+    fn create_render_pass(
+        device: &ash::Device,
+        swapchain_image_format: vk::Format,
+    ) -> vk::RenderPass {
+        let color_attachment = [vk::AttachmentDescription {
+            format: swapchain_image_format,
+            samples: vk::SampleCountFlags::TYPE_1,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            store_op: vk::AttachmentStoreOp::STORE,
+            // We don't use stencil buffer
+            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+            // We don't care about initial layout because we're gonna clear on load
+            initial_layout: vk::ImageLayout::UNDEFINED,
+            // We want to present the image with the swapchain after rendering
+            final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+            ..Default::default()
+        }];
+
+        let color_attachment_refs = [vk::AttachmentReference {
+            attachment: 0,
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        }];
+
+        let subpasses = [vk::SubpassDescription {
+            pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
+            color_attachment_count: color_attachment_refs.len() as u32,
+            p_color_attachments: color_attachment_refs.as_ptr(),
+            ..Default::default()
+        }];
+
+        let render_pass_info = vk::RenderPassCreateInfo {
+            attachment_count: color_attachment.len() as u32,
+            p_attachments: color_attachment.as_ptr(),
+            subpass_count: subpasses.len() as u32,
+            p_subpasses: subpasses.as_ptr(),
+            ..Default::default()
+        };
+
+        unsafe {
+            device
+                .create_render_pass(&render_pass_info, None)
+                .expect("Failed to create render pass")
+        }
+    }
+
     fn read_shader_code(shader_path: &Path) -> Vec<u8> {
         use std::fs::File;
         use std::io::Read;
@@ -842,6 +891,7 @@ impl Drop for VulkanApp {
         unsafe {
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device.destroy_render_pass(self.render_pass, None);
             for &imageview in self.swapchain_imageviews.iter() {
                 self.device.destroy_image_view(imageview, None);
             }
