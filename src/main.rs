@@ -49,9 +49,6 @@ fn required_extension_names() -> Vec<*const i8> {
     ]
 }
 
-// NOTE: in the production code you won't probably hardcode these names,
-//  as vulkan header file provides a macro for them, and ash structs have
-//  `name` associated function to get them: Swapchain::name()
 const REQUIRED_VALIDATION_LAYERS: [&'static str; 1] = ["VK_LAYER_KHRONOS_validation"];
 const DEVICE_EXTENSIONS: [&'static str; 1] = ["VK_KHR_swapchain"];
 
@@ -62,7 +59,6 @@ fn enabled_validation_layer_names() -> Vec<CString> {
         .collect()
 }
 
-// The callback function used in Debug Utils
 unsafe extern "system" fn vulkan_debug_utils_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -202,7 +198,6 @@ impl VulkanApp {
         }
         let app_name = CString::new("Hello Triangle").unwrap();
         let engine_name = CString::new("No Engine").unwrap();
-        // You can create vk structs with builders
         let app_info = vk::ApplicationInfo::builder()
             .application_name(&app_name)
             .application_version(vk_make_version!(1, 0, 0))
@@ -211,11 +206,8 @@ impl VulkanApp {
             .api_version(vk_make_version!(1, 1, 0))
             .build();
 
-        // This creates info used to debug issues in vk::createInstance and
-        // vk::destroyInstance
         let debug_utils_create_info = populate_debug_messenger_create_info();
 
-        // Provides VK_EXT debug utils
         let extension_names = required_extension_names();
 
         let enabled_layer_raw_names = enabled_validation_layer_names();
@@ -224,7 +216,6 @@ impl VulkanApp {
             .iter()
             .map(|layer_name| layer_name.as_ptr())
             .collect();
-        // You can create structs plainly by providing all fields
         let create_info = vk::InstanceCreateInfo {
             s_type: vk::StructureType::INSTANCE_CREATE_INFO,
             p_next: &debug_utils_create_info as *const vk::DebugUtilsMessengerCreateInfoEXT
@@ -288,7 +279,6 @@ impl VulkanApp {
         surface_stuff: &SurfaceStuff,
         indices: &QueueFamilyIndices,
     ) -> bool {
-        // More features can be queried with `get_physical_device_features`
         let device_properties = unsafe { instance.get_physical_device_properties(physical_device) };
 
         let device_type = match device_properties.device_type {
@@ -406,7 +396,6 @@ impl VulkanApp {
     fn choose_swapchain_format(
         available_formats: &Vec<vk::SurfaceFormatKHR>,
     ) -> vk::SurfaceFormatKHR {
-        // Check if list contains most widely used R8G8B8A8 format with nonlinear color space
         for available_format in available_formats {
             if available_format.format == vk::Format::R8G8B8A8_UNORM
                 && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
@@ -415,7 +404,6 @@ impl VulkanApp {
             }
         }
 
-        // Return the first format from the list
         return available_formats.first().unwrap().clone();
     }
 
@@ -916,6 +904,5 @@ fn main() {
     let event_loop = EventLoop::new();
     let window = init_window(&event_loop);
     let app = VulkanApp::new(&window);
-    // TODO: Not sure if moving window here is a good idea
     app.run(event_loop, window);
 }
