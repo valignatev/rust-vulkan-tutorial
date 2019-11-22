@@ -135,6 +135,7 @@ struct VulkanApp {
     swapchain: vk::SwapchainKHR,
     _swapchain_images: Vec<vk::Image>,
     swapchain_imageviews: Vec<vk::ImageView>,
+    swapchain_framebuffers: Vec<vk::Framebuffer>,
     _swapchain_format: vk::Format,
     _swapchain_extent: vk::Extent2D,
     pipeline_layout: vk::PipelineLayout,
@@ -167,6 +168,13 @@ impl VulkanApp {
         let (graphics_pipeline, pipeline_layout) =
             Self::create_graphics_pipeline(&device, &render_pass, swapchain_stuff.swapchain_extent);
 
+        let swapchain_framebuffers = Self::create_framebuffers(
+            &device,
+            render_pass,
+            &swapchain_imageviews,
+            &swapchain_stuff.swapchain_extent,
+        );
+
         VulkanApp {
             _entry: entry,
             instance,
@@ -185,6 +193,7 @@ impl VulkanApp {
             swapchain: swapchain_stuff.swapchain,
             _swapchain_images: swapchain_stuff.swapchain_images,
             swapchain_imageviews,
+            swapchain_framebuffers,
             _swapchain_format: swapchain_stuff.swapchain_format,
             _swapchain_extent: swapchain_stuff.swapchain_extent,
 
@@ -686,6 +695,36 @@ impl VulkanApp {
         (graphics_pipelines[0], pipeline_layout)
     }
 
+    fn create_framebuffers(
+        device: &ash::Device,
+        render_pass: vk::RenderPass,
+        image_views: &Vec<vk::ImageView>,
+        swapchain_extent: &vk::Extent2D,
+    ) -> Vec<vk::Framebuffer> {
+        let mut framebuffers = vec![];
+        for &image_view in image_views.iter() {
+            let attachments = [image_view];
+            let framebuffer_create_info = vk::FramebufferCreateInfo {
+                render_pass,
+                attachment_count: attachments.len() as u32,
+                p_attachments: attachments.as_ptr(),
+                width: swapchain_extent.width,
+                height: swapchain_extent.height,
+                // Our swapchain images are single images, so the number of layers is 1
+                layers: 1,
+                ..Default::default()
+            };
+
+            let framebuffer = unsafe {
+                device.create_framebuffer(&framebuffer_create_info, None)
+                    .expect("Failed to create Framebuffer!")
+            };
+            framebuffers.push(framebuffer);
+        }
+
+        framebuffers
+    }
+
     fn create_render_pass(
         device: &ash::Device,
         swapchain_image_format: vk::Format,
@@ -893,6 +932,9 @@ fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEX
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
+            for &framebuffer in self.swapchain_framebuffers.iter() {
+                self.device.destroy_framebuffer(framebuffer, None);
+            }
             self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
