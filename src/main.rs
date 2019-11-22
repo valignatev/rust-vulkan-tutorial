@@ -139,6 +139,7 @@ struct VulkanApp {
     _swapchain_extent: vk::Extent2D,
     pipeline_layout: vk::PipelineLayout,
     render_pass: vk::RenderPass,
+    graphics_pipeline: vk::Pipeline,
 }
 
 impl VulkanApp {
@@ -163,8 +164,8 @@ impl VulkanApp {
             &swapchain_stuff.swapchain_images,
         );
         let render_pass = Self::create_render_pass(&device, swapchain_stuff.swapchain_format);
-        let pipeline_layout =
-            Self::create_graphics_pipeline(&device, swapchain_stuff.swapchain_extent);
+        let (graphics_pipeline, pipeline_layout) =
+            Self::create_graphics_pipeline(&device, &render_pass, swapchain_stuff.swapchain_extent);
 
         VulkanApp {
             _entry: entry,
@@ -189,6 +190,7 @@ impl VulkanApp {
 
             pipeline_layout,
             render_pass,
+            graphics_pipeline,
         }
     }
 
@@ -551,8 +553,9 @@ impl VulkanApp {
 
     fn create_graphics_pipeline(
         device: &ash::Device,
+        render_pass: &vk::RenderPass,
         swapchain_extent: vk::Extent2D,
-    ) -> vk::PipelineLayout {
+    ) -> (vk::Pipeline, vk::PipelineLayout) {
         let vert_shader_code = Self::read_shader_code(Path::new("shaders/vert.spv"));
         let frag_shader_code = Self::read_shader_code(Path::new("shaders/frag.spv"));
 
@@ -561,7 +564,7 @@ impl VulkanApp {
 
         let shader_entrypoint = CString::new("main").unwrap();
 
-        let _shader_stages = [
+        let shader_stages = [
             vk::PipelineShaderStageCreateInfo {
                 stage: vk::ShaderStageFlags::VERTEX,
                 module: vert_shader_module,
@@ -654,12 +657,33 @@ impl VulkanApp {
                 .expect("Failed to create pipeline layout")
         };
 
+        let graphic_pipeline_infos = [vk::GraphicsPipelineCreateInfo {
+            stage_count: shader_stages.len() as u32,
+            p_stages: shader_stages.as_ptr(),
+            p_vertex_input_state: &vertex_input_info,
+            p_input_assembly_state: &input_assembly,
+            p_viewport_state: &viewport_state,
+            p_rasterization_state: &rasterizer,
+            p_multisample_state: &multisampling,
+            p_color_blend_state: &color_blending,
+            layout: pipeline_layout,
+            render_pass: *render_pass,
+            subpass: 0,
+            ..Default::default()
+        }];
+
+        let graphics_pipelines = unsafe {
+            device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &graphic_pipeline_infos, None)
+                .expect("Failed to greate graphics pipeline")
+        };
+
         unsafe {
             device.destroy_shader_module(vert_shader_module, None);
             device.destroy_shader_module(frag_shader_module, None);
         }
 
-        pipeline_layout
+        (graphics_pipelines[0], pipeline_layout)
     }
 
     fn create_render_pass(
@@ -869,6 +893,7 @@ fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateInfoEX
 impl Drop for VulkanApp {
     fn drop(&mut self) {
         unsafe {
+            self.device.destroy_pipeline(self.graphics_pipeline, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_render_pass(self.render_pass, None);
